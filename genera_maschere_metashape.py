@@ -234,6 +234,9 @@ def parse_args():
                    help="Sovrascrive maschere gia' esistenti.")
     p.add_argument("--suffix", default="_mask",
                    help="Suffisso del file maschera (default: _mask -> IMG_1234_mask.png).")
+    p.add_argument("--no-matting", action="store_true",
+                   help="Disattiva l'alpha matting (bordi piu' grezzi ma piu' veloce; "
+                        "elimina i PERFORMANCE WARNING di pymatting).")
     p.add_argument("--yes", "-y", action="store_true",
                    help="Installa le dipendenze mancanti senza chiedere conferma.")
     return p.parse_args()
@@ -393,15 +396,18 @@ def main():
             new_size = (round(full_size[0] * scale), round(full_size[1] * scale))
             work = img.resize(new_size, Image.LANCZOS)
 
-        # rembg con alpha matting per bordi piu' puliti
-        cut = remove(
-            work,
-            session=session,
-            alpha_matting=True,
-            alpha_matting_foreground_threshold=240,
-            alpha_matting_background_threshold=10,
-            alpha_matting_erode_size=10,
-        )
+        # rembg: alpha matting per bordi piu' puliti (disattivabile con --no-matting)
+        if args.no_matting:
+            cut = remove(work, session=session)
+        else:
+            cut = remove(
+                work,
+                session=session,
+                alpha_matting=True,
+                alpha_matting_foreground_threshold=240,
+                alpha_matting_background_threshold=10,
+                alpha_matting_erode_size=10,
+            )
         alpha = cut.split()[-1]  # canale alpha
 
         # Riporta alla risoluzione piena se downscalato
