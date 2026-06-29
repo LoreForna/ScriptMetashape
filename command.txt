@@ -1,0 +1,4 @@
+python genera_maschere_metashape.py --input "C:\Users\efr\Desktop\Lapidario\001\A" --output "C:\Users\efr\Desktop\Maschere\001\A" --downscale 2000 --alpha-threshold 15 --feather 0 --yes
+
+
+
