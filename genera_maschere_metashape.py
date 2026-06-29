@@ -43,9 +43,62 @@ Opzioni utili:
 
 import argparse
 import importlib.util
+import os
 import subprocess
 import sys
 from pathlib import Path
+
+
+# ---------------------------------------------------------------------------
+# FIX DLL CUDA/cuDNN SU WINDOWS
+# I pacchetti pip nvidia-*-cu12 mettono le DLL in sottocartelle di
+# site-packages che NON sono nel PATH: onnxruntime non le trova e fallisce
+# il caricamento del provider CUDA. Qui le registriamo esplicitamente con
+# os.add_dll_directory() PRIMA di importare onnxruntime/rembg.
+# ---------------------------------------------------------------------------
+def register_cuda_dll_dirs(verbose=True):
+    if os.name != "nt":
+        return  # serve solo su Windows
+    if not hasattr(os, "add_dll_directory"):
+        return
+    try:
+        import site
+        roots = []
+        try:
+            roots.extend(site.getsitepackages())
+        except Exception:
+            pass
+        usp = site.getusersitepackages()
+        if isinstance(usp, str):
+            roots.append(usp)
+        # Anche la site-packages dell'interprete corrente
+        roots.append(str(Path(sys.executable).parent / "Lib" / "site-packages"))
+
+        seen = set()
+        added = []
+        for root in roots:
+            nvidia_dir = Path(root) / "nvidia"
+            if not nvidia_dir.is_dir():
+                continue
+            # Cerca tutte le sottocartelle 'bin' dentro nvidia/* (cudnn, cuda_runtime, cublas, ...)
+            for bindir in nvidia_dir.glob("*/bin"):
+                key = str(bindir).lower()
+                if bindir.is_dir() and key not in seen:
+                    seen.add(key)
+                    try:
+                        os.add_dll_directory(str(bindir))
+                        added.append(str(bindir))
+                    except Exception:
+                        pass
+        if verbose and added:
+            print("[i] DLL CUDA registrate da:")
+            for a in added:
+                print("    " + a)
+        elif verbose:
+            print("[i] Nessuna cartella DLL nvidia-*-cu12 trovata in site-packages.")
+    except Exception as e:
+        if verbose:
+            print("[!] register_cuda_dll_dirs:", e)
 
 
 # ---------------------------------------------------------------------------
@@ -59,14 +112,30 @@ REQUIRED = {
     "onnxruntime": "onnxruntime-gpu",
     "rembg": "rembg[gpu]",
 }
+# Su Windows, onnxruntime-gpu ha bisogno di cuDNN 9 e del runtime CUDA 12.
+# Li aggiungiamo come dipendenze cosi' vengono installati in automatico e la
+# GPU funziona senza interventi manuali. (Su Linux di solito non servono qui.)
+if os.name == "nt":
+    REQUIRED["nvidia.cudnn"] = "nvidia-cudnn-cu12"
+    REQUIRED["nvidia.cuda_runtime"] = "nvidia-cuda-runtime-cu12"
+
 OPTIONAL = {
     "tqdm": "tqdm",  # barra di avanzamento, non indispensabile
 }
 
 
 def _missing(mapping):
-    return [(mod, spec) for mod, spec in mapping.items()
-            if importlib.util.find_spec(mod) is None]
+    result = []
+    for mod, spec in mapping.items():
+        try:
+            found = importlib.util.find_spec(mod) is not None
+        except (ImportError, ModuleNotFoundError, ValueError):
+            # find_spec puo' sollevare se il pacchetto genitore non esiste
+            # (es. 'nvidia.cudnn' quando 'nvidia' non e' installato)
+            found = False
+        if not found:
+            result.append((mod, spec))
+    return result
 
 
 def _pip_install(specs):
@@ -185,8 +254,10 @@ MODELS = [
 
 def scegli_modello_interattivo():
     """Mostra un menu numerato e ritorna l'id del modello scelto."""
+    default = MODELS[0]
     print("\n" + "=" * 70)
     print("  MODELLI DISPONIBILI  (digita il numero e premi Invio)")
+    print(f"  Modello di DEFAULT: {default['nome']}  (id: {default['id']})")
     print("=" * 70)
     for i, m in enumerate(MODELS, start=1):
         default_tag = "  [DEFAULT]" if i == 1 else ""
@@ -197,9 +268,10 @@ def scegli_modello_interattivo():
     print("\n" + "=" * 70)
 
     while True:
-        scelta = input(f"Modello [1-{len(MODELS)}], Invio = 1 (ISNet): ").strip()
+        scelta = input(f"Modello [1-{len(MODELS)}], Invio = default ({default['id']}): ").strip()
         if scelta == "":
-            return MODELS[0]["id"]
+            print(f"[i] Uso il modello di default: {default['nome']} ({default['id']})")
+            return default["id"]
         if scelta.isdigit() and 1 <= int(scelta) <= len(MODELS):
             return MODELS[int(scelta) - 1]["id"]
         print("  Scelta non valida, riprova.")
@@ -232,6 +304,10 @@ def main():
 
     # Verifica/installa le dipendenze PRIMA di importarle
     ensure_dependencies(assume_yes=args.yes)
+
+    # Registra le cartelle DLL di cuDNN/CUDA (nvidia-*-cu12) PRIMA di importare
+    # onnxruntime, altrimenti su Windows il provider CUDA non trova cudnn64_9.dll.
+    register_cuda_dll_dirs()
 
     # Import differiti: solo ora che siamo certi siano installate
     global np, Image, tqdm
