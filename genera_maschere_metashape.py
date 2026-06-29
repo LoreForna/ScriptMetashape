@@ -57,48 +57,82 @@ from pathlib import Path
 # os.add_dll_directory() PRIMA di importare onnxruntime/rembg.
 # ---------------------------------------------------------------------------
 def register_cuda_dll_dirs(verbose=True):
+    """
+    Rende trovabili le DLL di cuDNN/CUDA (pacchetti pip nvidia-*-cu12) per
+    onnxruntime su Windows. Fa DUE cose, perche' su onnxruntime-gpu recente
+    os.add_dll_directory() da solo a volte non basta:
+      1) registra ogni cartella con DLL via os.add_dll_directory();
+      2) la antepone anche al PATH del processo.
+    Individua la cartella base tramite nvidia.__path__ (metodo corretto per il
+    namespace package, che non ha __file__).
+    """
     if os.name != "nt":
         return  # serve solo su Windows
-    if not hasattr(os, "add_dll_directory"):
-        return
+
+    bindirs = []
+    # Metodo principale: usa nvidia.__path__
     try:
-        import site
-        roots = []
+        import nvidia
+        for base in list(getattr(nvidia, "__path__", [])):
+            base = Path(base)
+            # Sottocartelle con DLL: nvidia/<pkg>/bin (cudnn, cublas, cuda_runtime, ...)
+            for sub in base.glob("*/bin"):
+                if sub.is_dir():
+                    bindirs.append(sub)
+    except Exception:
+        pass
+
+    # Fallback: scandaglia le site-packages note
+    if not bindirs:
         try:
-            roots.extend(site.getsitepackages())
+            import site
+            roots = []
+            try:
+                roots.extend(site.getsitepackages())
+            except Exception:
+                pass
+            usp = site.getusersitepackages()
+            if isinstance(usp, str):
+                roots.append(usp)
+            roots.append(str(Path(sys.executable).parent / "Lib" / "site-packages"))
+            for root in roots:
+                nv = Path(root) / "nvidia"
+                if nv.is_dir():
+                    for sub in nv.glob("*/bin"):
+                        if sub.is_dir():
+                            bindirs.append(sub)
         except Exception:
             pass
-        usp = site.getusersitepackages()
-        if isinstance(usp, str):
-            roots.append(usp)
-        # Anche la site-packages dell'interprete corrente
-        roots.append(str(Path(sys.executable).parent / "Lib" / "site-packages"))
 
-        seen = set()
-        added = []
-        for root in roots:
-            nvidia_dir = Path(root) / "nvidia"
-            if not nvidia_dir.is_dir():
-                continue
-            # Cerca tutte le sottocartelle 'bin' dentro nvidia/* (cudnn, cuda_runtime, cublas, ...)
-            for bindir in nvidia_dir.glob("*/bin"):
-                key = str(bindir).lower()
-                if bindir.is_dir() and key not in seen:
-                    seen.add(key)
-                    try:
-                        os.add_dll_directory(str(bindir))
-                        added.append(str(bindir))
-                    except Exception:
-                        pass
-        if verbose and added:
-            print("[i] DLL CUDA registrate da:")
+    # Deduplica preservando l'ordine
+    seen = set()
+    unique = []
+    for d in bindirs:
+        k = str(d).lower()
+        if k not in seen:
+            seen.add(k)
+            unique.append(d)
+
+    added = []
+    for d in unique:
+        # 1) DLL directory (Python 3.8+)
+        if hasattr(os, "add_dll_directory"):
+            try:
+                os.add_dll_directory(str(d))
+            except Exception:
+                pass
+        # 2) PATH del processo (in testa)
+        os.environ["PATH"] = str(d) + os.pathsep + os.environ.get("PATH", "")
+        added.append(str(d))
+
+    if verbose:
+        if added:
+            print("[i] DLL CUDA/cuDNN registrate (add_dll_directory + PATH):")
             for a in added:
                 print("    " + a)
-        elif verbose:
-            print("[i] Nessuna cartella DLL nvidia-*-cu12 trovata in site-packages.")
-    except Exception as e:
-        if verbose:
-            print("[!] register_cuda_dll_dirs:", e)
+        else:
+            print("[!] Nessuna cartella DLL nvidia-*-cu12 trovata. "
+                  "Se la GPU non parte, installa: pip install nvidia-cudnn-cu12 nvidia-cuda-runtime-cu12")
 
 
 # ---------------------------------------------------------------------------
