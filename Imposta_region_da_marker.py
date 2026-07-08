@@ -108,13 +108,13 @@ class ConfigDialog(QtWidgets.QDialog):
         layout = QtWidgets.QVBoxLayout(self)
 
         info = QtWidgets.QLabel(
-            "Scegli 3 marker (con posizione 3D) che definiscono il piano del muro.\n"
+            "Scegli 3 marker (con posizione 3D) che definiscono il piano di proiezione.\n"
             "Origine: primo estremo dell'asse orizzontale.\n"
             "Asse X: secondo estremo dell'asse orizzontale.\n"
             "Asse Y: definisce la direzione verticale (non collineare).\n\n"
             "Il CENTRO della region viene posto nel punto medio tra Origine e Asse X.\n"
             "La ROTAZIONE segue gli assi u (orizzontale), v (verticale), w (normale).\n\n"
-            "La region diventa un RETTANGOLO sul piano dei 3 marker: lunghezza =\n"
+            "La region diventa un SEGMENTO sul piano dei 3 marker: lunghezza =\n"
             "distanza Origine <-> Asse X su u, altezza = proiezione del marker Asse Y\n"
             "su v, spessore minimo su w. Poi la ingrossi in profondita' a mano\n"
             "trascinando le maniglie in Metashape."
