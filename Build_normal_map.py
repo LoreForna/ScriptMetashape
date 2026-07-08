@@ -51,6 +51,7 @@ Richiede:
 
 import os
 import math
+import re
 from array import array
 import Metashape
 
@@ -105,12 +106,27 @@ def get_chunk():
     return chunk
 
 
+def _natural_key(label):
+    """Chiave di ordinamento alfanumerico 'naturale': separa testo e numeri
+    cosi' che 'point 2' venga prima di 'point 10'."""
+    parts = re.split(r"(\d+)", label)
+    key = []
+    for p in parts:
+        if p.isdigit():
+            key.append((1, int(p), ""))
+        else:
+            key.append((0, 0, p.lower()))
+    return key
+
+
 def available_markers(chunk):
-    """Lista (label, marker) dei soli marker con posizione 3D stimata."""
+    """Lista (label, marker) dei soli marker con posizione 3D stimata,
+    ordinata in modo alfanumerico naturale sul label."""
     out = []
     for m in chunk.markers:
         if m.position:
             out.append((m.label, m))
+    out.sort(key=lambda pair: _natural_key(pair[0]))
     return out
 
 
